@@ -10,6 +10,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/epoll.h>
+#include <errno.h>
+#include <stdio.h>
 
 #define MAX_EVENTS 32 // Number of events which Epoll will return at once.
 

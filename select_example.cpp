@@ -8,11 +8,13 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <stdio.h>
+#include <errno.h>
 
 #define PORTNUM 1500 // Port > 1024 because program will not work not as root.
 
 // Compile:
-// g++ -std=c++11 0_select_server.cpp -o select_server
+// g++ -std=c++11 select_example.cpp -o select_example
 
 int set_nonblock_mode(int fd)
 {

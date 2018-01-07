@@ -9,13 +9,16 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <stdio.h>
+#include <errno.h>
 
 #define POLL_SIZE 2048 // Artifical limit for Poll since it is not limited to 1024 file descriptors like Select.
 
 #define PORTNUM 1500 // Port > 1024 because program will not work not as root.
 
 // Compile:
-// g++ -std=c++11 1_poll_server.cpp -o poll_server
+// g++ -std=c++11 poll_example.cpp -o poll_example
+
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
 #endif
