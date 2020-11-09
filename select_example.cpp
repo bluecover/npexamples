@@ -11,15 +11,19 @@
 #include <stdio.h>
 #include <errno.h>
 
-#define PORTNUM 1500 // Port > 1024 because program will not work not as root.
-
 // Compile:
 // g++ -std=c++11 select_example.cpp -o select_example
+
+#define PORTNUM 1500 // Port > 1024 because program will not work not as root.
+
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
 
 int set_nonblock_mode(int fd)
 {
     int flags;
-#if defined (O_NONBLOCK)
+#if defined(O_NONBLOCK)
     if (-1 == (flags = fcntl(fd, F_GETFL, 0)))
     {
         flags = 0;
@@ -36,10 +40,10 @@ void die(const char *msg)
 {
     // Move latest errno to stderr with message msg.
     perror(msg);
-    
+
     // perror - POSIX standard function.
     // or use strerror(errno);
-    
+
     exit(1); // TODO EXIT_FAILURE
 }
 
@@ -49,104 +53,102 @@ void die(const char *msg)
 int main(int argc, char **argv)
 {
     // Create socket
-    int masterSocketFd = -1;
-    if ((masterSocketFd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1)
+    int master_socket_fd = -1;
+    if ((master_socket_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1)
     {
         die("Error of calling socket");
     }
-    
+
     // For UDP SO_REUSEADDR may mean some problems...
     int optval = 1;
-    if (setsockopt(masterSocketFd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)) == -1)
+    if (setsockopt(master_socket_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)) == -1)
     {
         die("Error of calling setsockopt");
     }
-    
-    std::set<int> slaveSockets;
-    struct sockaddr_in serverAddress;
-    memset(&serverAddress, '\0', sizeof(serverAddress));
-    serverAddress.sin_family = AF_INET;
-    serverAddress.sin_addr.s_addr = htonl(INADDR_ANY); // 0.0.0.0
-    serverAddress.sin_port = htons((int)PORTNUM);
+
+    std::set<int> slave_sockets;
+    struct sockaddr_in server_addr;
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = htonl(INADDR_ANY); // 0.0.0.0
+    server_addr.sin_port = htons((int)PORTNUM);
 
     // Link socket with address
-    if (bind(masterSocketFd, (struct sockaddr *)(&serverAddress), sizeof(serverAddress)) == -1)
+    if (bind(master_socket_fd, (struct sockaddr *)(&server_addr), sizeof(server_addr)) == -1)
     {
         die("Error of calling bind");
     }
-    
-    set_nonblock_mode(masterSocketFd);
+
+    set_nonblock_mode(master_socket_fd);
 
     // Server is ready to get SOMAXCONN connection requests (128).
     // This is *SHOULD* be enought to call accept and create child process.
-    if (listen(masterSocketFd, SOMAXCONN) == -1)
+    if (listen(master_socket_fd, SOMAXCONN) == -1)
     {
         die("Error of calling listen");
     }
-    
-    std::cout << "Server is ready: " << inet_ntoa(serverAddress.sin_addr) << std::endl;
-    
+
+    std::cout << "Server is ready: " << inet_ntoa(server_addr.sin_addr) << std::endl;
+
     while (true)
     {
-        fd_set readFlags, writeFlags;
-        FD_ZERO(&readFlags);
-        
-        FD_SET(masterSocketFd, &readFlags);
-        for (auto iter = slaveSockets.begin(); iter != slaveSockets.end(); iter++)
+        fd_set read_flags, write_flags;
+        FD_ZERO(&read_flags);
+
+        FD_SET(master_socket_fd, &read_flags);
+        for (auto iter = slave_sockets.begin(); iter != slave_sockets.end(); iter++)
         {
-            FD_SET(*iter, &readFlags);
+            FD_SET(*iter, &read_flags);
         }
 
-        int max = std::max(masterSocketFd,
-            *std::max_element(slaveSockets.begin(), slaveSockets.end()));
+        int max = std::max(master_socket_fd,
+                           *std::max_element(slave_sockets.begin(), slave_sockets.end()));
 
-        int readyDesc = select(max + 1, &readFlags, &writeFlags, (fd_set*)0, NULL);
-        if(readyDesc == -1)
+        int ready_desc = select(max + 1, &read_flags, &write_flags, (fd_set *)0, NULL);
+        if (ready_desc == -1)
         {
             die("Error of calling select");
         }
         else
         {
-            std::cout << "Number of ready descriptors: " << readyDesc << std::endl;
+            std::cout << "Number of ready descriptors: " << ready_desc << std::endl;
         }
-        
-        for (auto iter = slaveSockets.begin(); iter != slaveSockets.end(); iter++)
-        {
-            if (FD_ISSET(*iter, &readFlags))
-            {
-                static char Buffer[1024];
-                int RecvSize = recv(*iter, Buffer, 1024, MSG_NOSIGNAL);
 
-                if ((RecvSize == 0) && (errno != EAGAIN))
+        for (auto iter = slave_sockets.begin(); iter != slave_sockets.end(); iter++)
+        {
+            if (FD_ISSET(*iter, &read_flags))
+            {
+                static char buf[1024];
+                int recv_size = recv(*iter, buf, 1024, MSG_NOSIGNAL);
+
+                if ((recv_size == 0) && (errno != EAGAIN))
                 {
                     shutdown(*iter, SHUT_RDWR);
                     close(*iter);
-                    slaveSockets.erase(iter);
+                    slave_sockets.erase(iter);
                 }
-                else if (RecvSize != 0)
+                else if (recv_size != 0)
                 {
-                    send(*iter, Buffer, RecvSize, MSG_NOSIGNAL);
+                    send(*iter, buf, recv_size, MSG_NOSIGNAL);
                 }
             }
         }
 
-        if (FD_ISSET(masterSocketFd, &readFlags))
+        if (FD_ISSET(master_socket_fd, &read_flags))
         {
-            struct sockaddr_in clientAddress;
-            socklen_t addressLength = sizeof(clientAddress);
-            memset(&clientAddress, '\0', sizeof(clientAddress));
-            int slaveSocket = -1;
-            if ((slaveSocket = accept(masterSocketFd, (struct sockaddr *)&clientAddress, &addressLength)) == -1)
+            struct sockaddr_in client_addr;
+            socklen_t slen = sizeof(client_addr);
+            memset(&client_addr, 0, sizeof(client_addr));
+            int client_fd = accept(master_socket_fd, (struct sockaddr *)&client_addr, &slen);
+            if (client_fd == -1)
             {
                 if (errno != EWOULDBLOCK || errno != EAGAIN)
                     die("Error of calling accept");
             }
-            
-            set_nonblock_mode(slaveSocket);
-            
-            slaveSockets.insert(slaveSocket);
+            set_nonblock_mode(client_fd);
+            slave_sockets.insert(client_fd);
         }
     }
-    
+
     return 0;
 }
